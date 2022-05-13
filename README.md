@@ -1,2 +1,10 @@
-# SISCOMP_TP3
-Ejemplos de manejo de registros en modo real y modo protegido en arquitecturas x86
+Universidad Nacional de Córdoba - Facultad de Ciencias Exactas, Físicas y Naturales
+# Sistemas de Computación - Trabajo Practico #3
+
+Para compilar los ejemplos:
+
+    nasm -f bin <nombre-del-archivo-asm> -o <nombre-del-binario>
+
+Para correrlos en el entorno virtual QEMU:
+    
+    qemu-system-x86_64 <nombre-del-binario>
