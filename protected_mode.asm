@@ -80,10 +80,10 @@ GDT_descriptor:
     dw GDT_end - GDT_start - 1 ; tamaño
     dd GDT_start    ; puntero al inicio de la GDT
 
-
 [bits 32]
 start_protected_mode: ; ya no tenemos interrupciones y tenemos que escribir directamente en videoMemory (empieza en 0xB8000)
-    ; carga el data segment en todos los registros de datos
+    ; DATA_SEG es el offset relativo a la gdt --> es decir, el selector.
+    ; carga los selectores a los registros de segmento aaaa
     mov ax, DATA_SEG
     mov ds, ax 
     mov es, ax 
@@ -91,7 +91,7 @@ start_protected_mode: ; ya no tenemos interrupciones y tenemos que escribir dire
     mov gs, ax
     mov ss, ax
     ; define los punteros base pointer y stack pointer
-    mov ebp, 0x7000
+    mov ebp, 0x7c00
     mov esp, ebp
     
     PUSH_EADX
@@ -105,7 +105,7 @@ start_protected_mode: ; ya no tenemos interrupciones y tenemos que escribir dire
     mov edx, 160 ; 160 = 80*2 = line width * bytes per character on screen
     mul edx 
     lea edx, [eax + 0xb8000] ;load effective address destination, source
-    mov ah, 0x0F
+    mov ah, 0x0F ;color
 
 loop:
     mov al, [ecx] ; recorremos el array de "hello world"
@@ -121,6 +121,7 @@ end:
     inc al
     mov [vga_current_line], al
     POP_EDAX
+    
 BOOT_DISK: db 0                            
 
 times 510-($-$$) db 0              
