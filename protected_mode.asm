@@ -1,22 +1,23 @@
-%macro PUSH_EADX 0
-    push eax
-    push ebx
-    push ecx
-    push edx
-%endmacro
+; iniciamos en 16 bits
+bits 16
+org 0x7c00
 
-%macro POP_EDAX 0
-    pop edx
-    pop ecx
-    pop ebx
-    pop eax
-%endmacro
+boot:
+    ; enable A20 bit
+    mov ax, 0x2401
+    int 0x15
 
-[org 0x7c00]   ; arranca en 0x7C00     
+    ; set vga to be normal mode
+    mov ax, 0x3
+    int 0x10
 
-message db "hello world", 0
-vga_current_line dd 0
-mov [BOOT_DISK], dl    
+    cli                             ; Deshabilitamos las interrupciones, ya no podemos usarlas como antes para interactuar con la BIOS
+    lgdt [gdt_pointer]              ; Cargamos la GDT
+
+    mov eax, cr0                    ; Modificamos el ultimo bit del registro CR0 (PE) a 1 para habilitar el modo protegido
+    or eax,0x1                        
+    mov cr0, eax                    
+    jmp CODE_SEG:boot2              
 
 ; lo primero que tenemos que definir es el tamaño y la ubicación de nuestros segmentos
 ; para eso definimos:
@@ -41,88 +42,57 @@ mov [BOOT_DISK], dl
 ;       - direction: el segmento crece hacia abajo 1
 ;       - writable: 0 si es read only
 ;
-CODE_SEG equ GDT_code - GDT_start
-DATA_SEG equ GDT_data - GDT_start
+gdt_start:
+    dq 0x0 ; inicializamos 8 bytes en 0, condición impuesta por el fabricante
+gdt_code:
+    dw 0xffff ; límite
+    dw 0x0  ; base (16 bits)
+    db 0x0  ; base (8 bits) : (16 + 8 = 24 bits)
+    db 0b10011010   ; pres, priv, type, type flags, other flags
+    db 0b11001111   ; other flags, limit (ultimos 4 bits, en total son 20)
+    db 0x0  ; ultimos 8 bits de la base (32 bits)
+gdt_data:
+    dw 0xFFFF
+    dw 0x0
+    db 0x0
+    db 10010010b
+    db 11001111b
+    db 0x0
+gdt_end:
+gdt_pointer:
+    dw gdt_end - gdt_start-1    ; tamaño
+    dd gdt_start                ; puntero al inicio de la GDT
 
-cli ; deshabilitamos las interrupciones, ya no podemos usarlas como antes para interactuar con la BIOS
-lgdt [GDT_descriptor]   ; cargamos la GDT
-mov eax, cr0    
-or eax, 1   
-mov cr0, eax    ; seteamos el ultimo bit (PE) de CR0 a 1 para habilitar el modo protegido
-jmp CODE_SEG:start_protected_mode
+CODE_SEG equ gdt_code - gdt_start
+DATA_SEG equ gdt_data - gdt_start
 
-;jmp $                        
-                                     
-GDT_start:
-    GDT_null: ; inicializamos 8 bytes en 0, condición impuesta por el fabricante
-        dd 0x0
-        dd 0x0
+bits 32
 
-    GDT_code:
-        dw 0xffff ; límite
-        dw 0x0  ; base (16 bits)
-        db 0x0  ; base (8 bits) : (16 + 8 = 24 bits)
-        db 0b10011010   ; pres, priv, type, type flags, other flags
-        db 0b11001111   ; other flags, limit (ultimos 4 bits, en total son 20)
-        db 0x0  ; ultimos 8 bits de la base (32 bits)
-
-    GDT_data:
-        dw 0xffff
-        dw 0x0
-        db 0x0
-        db 0b10010010
-        db 0b11001111
-        db 0x0
-
-GDT_end:
-
-GDT_descriptor:
-    dw GDT_end - GDT_start - 1 ; tamaño
-    dd GDT_start    ; puntero al inicio de la GDT
-
-[bits 32]
-start_protected_mode: ; ya no tenemos interrupciones y tenemos que escribir directamente en videoMemory (empieza en 0xB8000)
+boot2:
     ; DATA_SEG es el offset relativo a la gdt --> es decir, el selector.
-    ; carga los selectores a los registros de segmento aaaa
+    ; carga los selectores a los registros de segmento
     mov ax, DATA_SEG
-    mov ds, ax 
-    mov es, ax 
-    mov fs, ax 
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
     mov gs, ax
     mov ss, ax
-    ; define los punteros base pointer y stack pointer
-    mov ebp, 0x7c00
-    mov esp, ebp
-    
-    PUSH_EADX
-    ; carga el mensaje "hello world" al registro de uso general ecx
-    mov ecx, $message
-    mov eax, $vga_current_line
-    mov edx, 0
-    mov ebx, 25 ; cantidad de lineas horizontales ?¿
-    div ebx 
-    mov eax, edx 
-    mov edx, 160 ; 160 = 80*2 = line width * bytes per character on screen
-    mul edx 
-    lea edx, [eax + 0xb8000] ;load effective address destination, source
-    mov ah, 0x0F ;color
+    mov esi,hello   ; carga el mensaje "hello world" al registro de propósito general
+    mov ebx,0xb8000 ; ya no tenemos interrupciones y tenemos que escribir directamente en videoMemory (empieza en 0xB8000)
 
-loop:
-    mov al, [ecx] ; recorremos el array de "hello world"
-    cmp al, 0 ; si es 0 (null character, termino el string), salgo
-    je end
-    mov [edx], ax ; creo que edx es lo que printea en pantalla
-    inc ecx 
-    add edx, 2
-    jmp loop
+.loop:
+    lodsb                           ; carga la string de [DS:SI] a AL
+    or al,al                        ; 
+    jz halt                         ; las dos lineas de arriba son equivalentes a decir CMP AL, 0 JE halt
+    or eax,0x0F00                   ; configuramos el color para que sea blanco  [4bit bg color][4bit text color][8bit ascii]
+                                    ; mas informacion sobre los colores: https://en.wikipedia.org/wiki/Video_Graphics_Array#Color_palette
+    mov word [ebx], ax      ; ingresamos el color y el buffer
+    add ebx,2                       ; incrementamos ebx por dos bytes (1byte por color, 1byte por ASCII)
+    jmp .loop
+halt:
+    cli
+    hlt
+hello: db "Hello world!",0
 
-end:
-    mov al, [vga_current_line]
-    inc al
-    mov [vga_current_line], al
-    POP_EDAX
-    
-BOOT_DISK: db 0                            
-
-times 510-($-$$) db 0              
+times 510 - ($-$$) db 0
 dw 0xaa55
